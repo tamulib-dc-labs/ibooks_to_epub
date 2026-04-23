@@ -13,6 +13,7 @@ from convert import (
     convert_one,
     _parse_paginated_css,
     _page_css,
+    _pt_to_px,
     _inject_fixed_layout_head,
 )
 
@@ -137,6 +138,33 @@ class TestParsePaginatedCss:
 
     def test_empty_css(self):
         assert _parse_paginated_css("/* no slots */") == []
+
+
+# ---------------------------------------------------------------------------
+# _pt_to_px
+# ---------------------------------------------------------------------------
+
+class TestPtToPx:
+    def test_converts_pt_to_px(self):
+        assert _pt_to_px("788.000pt") == "788.000px"
+
+    def test_leaves_px_unchanged(self):
+        assert _pt_to_px("100px") == "100px"
+
+    def test_leaves_integers_unchanged(self):
+        assert _pt_to_px("1") == "1"
+
+    def test_page_css_uses_px(self):
+        page = {
+            "width": "1024.0pt",
+            "height": "748.0pt",
+            "slots": {"el": {"left": "100pt", "top": "200pt", "width": "300pt", "height": "50pt", "z-index": "1"}},
+            "ids": ["el"],
+        }
+        css = _page_css(page)
+        assert "pt" not in css
+        assert "1024.0px" in css
+        assert "100px" in css
 
 
 # ---------------------------------------------------------------------------

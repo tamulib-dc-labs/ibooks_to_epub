@@ -97,17 +97,30 @@ def _parse_paginated_css(css_text: str) -> list[dict]:
 
 # ── XHTML transformation ──────────────────────────────────────────────────────
 
+def _pt_to_px(value: str) -> str:
+    """
+    Convert iBooks 'pt' units to CSS 'px'.
+    iBooks Author uses pt as 1:1 screen pixels (iPad logical pixels),
+    but CSS renderers treat 1pt = 1.333px at 96 dpi — wrong for screen layout.
+    """
+    if value.endswith("pt"):
+        return value[:-2] + "px"
+    return value
+
+
 def _page_css(page: dict) -> str:
     """Generate standard absolute-positioning CSS for a fixed-layout page."""
+    w = _pt_to_px(page["width"])
+    h = _pt_to_px(page["height"])
     lines = [
         "html, body { margin: 0; padding: 0; }",
-        f"body {{ position: relative; width: {page['width']}; height: {page['height']}; overflow: hidden; }}",
+        f"body {{ position: relative; width: {w}; height: {h}; overflow: hidden; }}",
     ]
     for eid, props in page["slots"].items():
         css_props = ["position: absolute"]
         for k in ("left", "top", "width", "height", "z-index"):
             if k in props:
-                css_props.append(f"{k}: {props[k]}")
+                css_props.append(f"{k}: {_pt_to_px(props[k])}")
         lines.append(f"#{eid} {{ {'; '.join(css_props)}; }}")
     return "\n".join(lines)
 
@@ -135,6 +148,7 @@ def _inject_fixed_layout_head(xhtml: str, page: dict) -> str:
     """
     xhtml = _strip_ibooks_refs(xhtml)
 
+    # iBooks pt values are 1:1 with screen pixels
     w = int(float(page["width"].rstrip("pt")))
     h = int(float(page["height"].rstrip("pt")))
     block = (
