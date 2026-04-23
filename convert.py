@@ -125,9 +125,25 @@ def _page_css(page: dict) -> str:
     return "\n".join(lines)
 
 
+def _extract_css_hrefs(xhtml: str) -> list[str]:
+    """
+    Return hrefs of non-paginated CSS files from <?xml-stylesheet?> PIs.
+    These need to be preserved as <link> tags after the PIs are stripped.
+    """
+    hrefs = []
+    for m in re.finditer(r"<\?xml-stylesheet\b([^?]*)\?>", xhtml):
+        content = m.group(1)
+        href_m = re.search(r"href=['\"]([^'\"]+)['\"]", content)
+        if href_m:
+            href = href_m.group(1)
+            if not href.endswith("-paginated.css"):
+                hrefs.append(href)
+    return hrefs
+
+
 def _strip_ibooks_refs(xhtml: str) -> str:
-    """Remove all iBooks-specific processing instructions and link/object tags."""
-    # <?xml-stylesheet?> processing instructions
+    """Remove iBooks-specific processing instructions and link/object tags."""
+    # All <?xml-stylesheet?> PIs (callers re-add the non-paginated ones as <link> tags)
     xhtml = re.sub(r"<\?xml-stylesheet[^?]*\?>", "", xhtml)
     # <link> tags for iBooks hint files
     xhtml = re.sub(r'<link\b[^>]*\btype="application/x-ibooks[^"]*"[^>]*/>', "", xhtml)
@@ -141,12 +157,24 @@ def _strip_ibooks_refs(xhtml: str) -> str:
     return xhtml
 
 
+def _restore_css_links(xhtml: str, css_hrefs: list[str]) -> str:
+    """Inject <link> tags for the given CSS hrefs into <head>."""
+    if not css_hrefs:
+        return xhtml
+    links = "\n".join(
+        f'<link rel="stylesheet" type="text/css" href="{h}" />' for h in css_hrefs
+    )
+    return re.sub(r"(<head(?:\s[^>]*)?>)", r"\1\n" + links, xhtml, count=1)
+
+
 def _inject_fixed_layout_head(xhtml: str, page: dict) -> str:
     """
-    Remove iBooks references; inject viewport meta and absolute-position
-    style block into the XHTML <head>.
+    Preserve the original CSS link; remove iBooks-specific markup; inject
+    viewport meta and absolute-position style block into the XHTML <head>.
     """
+    css_hrefs = _extract_css_hrefs(xhtml)
     xhtml = _strip_ibooks_refs(xhtml)
+    xhtml = _restore_css_links(xhtml, css_hrefs)
 
     # iBooks pt values are 1:1 with screen pixels
     w = int(float(page["width"].rstrip("pt")))
@@ -242,12 +270,13 @@ def _apply_fixed_layout(work_dir: Path) -> None:
         stem = Path(xhtml_href).stem
         css_path = opf_dir / "assets" / "css" / f"{stem}-paginated.css"
         if not css_path.exists():
-            # No paginated CSS — strip iBooks refs and mark as fixed-layout
+            # No paginated CSS — strip iBooks refs, restore CSS links, mark fixed-layout
             xhtml_path = opf_dir / xhtml_href
-            xhtml_path.write_text(
-                _strip_ibooks_refs(xhtml_path.read_text(encoding="utf-8")),
-                encoding="utf-8",
-            )
+            raw = xhtml_path.read_text(encoding="utf-8")
+            css_hrefs = _extract_css_hrefs(raw)
+            raw = _strip_ibooks_refs(raw)
+            raw = _restore_css_links(raw, css_hrefs)
+            xhtml_path.write_text(raw, encoding="utf-8")
             itemref.set("properties", "rendition:layout-pre-paginated")
             processed_hrefs.add(xhtml_href)
             continue
@@ -344,10 +373,11 @@ def _apply_fixed_layout(work_dir: Path) -> None:
             continue
         xhtml_path = opf_dir / xhtml_href
         if xhtml_path.exists():
-            xhtml_path.write_text(
-                _strip_ibooks_refs(xhtml_path.read_text(encoding="utf-8")),
-                encoding="utf-8",
-            )
+            raw = xhtml_path.read_text(encoding="utf-8")
+            css_hrefs = _extract_css_hrefs(raw)
+            raw = _strip_ibooks_refs(raw)
+            raw = _restore_css_links(raw, css_hrefs)
+            xhtml_path.write_text(raw, encoding="utf-8")
 
     # Add EPUB 3 fixed-layout rendition metadata
     for prop, val in [
